@@ -113,6 +113,11 @@
             android:defaultValue="30"
             app:useSimpleSummaryProvider="true" />
 
+        <Preference
+            android:key="sync_test"
+            android:title="@string/settings_sync_test"
+            android:summary="@string/settings_sync_test_summary" />
+
     </PreferenceCategory>
 
 </PreferenceScreen>

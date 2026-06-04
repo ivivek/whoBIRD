@@ -6,6 +6,8 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.MenuItem;
 import android.widget.Toast;
 
@@ -20,7 +22,17 @@ import com.google.android.material.bottomappbar.BottomAppBar;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.navigation.NavigationBarView;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.woheller69.preferences.EditTextSwitchPreference;
+
+import java.util.concurrent.TimeUnit;
+
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 public class SettingsActivity extends BaseActivity {
 Context mContext;
@@ -129,6 +141,54 @@ Context mContext;
                     showSpectrogramPref.setChecked(false);
                 }
                 return true; // Allow the change
+            });
+
+            Preference syncTest = getPreferenceManager().findPreference("sync_test");
+            if (syncTest != null) syncTest.setOnPreferenceClickListener(preference -> {
+                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(requireContext());
+                String url = prefs.getString("sync_pi_url", "").trim();
+                if (url.isEmpty()) {
+                    Toast.makeText(requireContext(), R.string.sync_test_no_url, Toast.LENGTH_SHORT).show();
+                    return true;
+                }
+                String stationId = prefs.getString("sync_station_id", "phone-1");
+                Toast.makeText(requireContext(), R.string.sync_test_running, Toast.LENGTH_SHORT).show();
+                Context appContext = requireContext().getApplicationContext();
+                new Thread(() -> {
+                    String message;
+                    try {
+                        // Empty batch: proves reachability and that the receiver answers the
+                        // sync protocol (response carries "inserted"), without writing any rows.
+                        OkHttpClient http = new OkHttpClient.Builder()
+                                .connectTimeout(5, TimeUnit.SECONDS)
+                                .readTimeout(5, TimeUnit.SECONDS)
+                                .build();
+                        String payload = new JSONObject()
+                                .put("station_id", stationId)
+                                .put("detections", new JSONArray())
+                                .toString();
+                        Request req = new Request.Builder()
+                                .url(url)
+                                .post(RequestBody.create(payload, MediaType.get("application/json; charset=utf-8")))
+                                .build();
+                        try (Response resp = http.newCall(req).execute()) {
+                            String body = resp.body() != null ? resp.body().string() : "";
+                            if (resp.isSuccessful() && body.contains("\"inserted\"")) {
+                                message = appContext.getString(R.string.sync_test_ok);
+                            } else if (resp.isSuccessful()) {
+                                message = appContext.getString(R.string.sync_test_wrong_server, resp.code());
+                            } else {
+                                message = appContext.getString(R.string.sync_test_http_error, resp.code());
+                            }
+                        }
+                    } catch (Exception e) {
+                        message = appContext.getString(R.string.sync_test_failed, e.getMessage());
+                    }
+                    String finalMessage = message;
+                    new Handler(Looper.getMainLooper()).post(() ->
+                            Toast.makeText(appContext, finalMessage, Toast.LENGTH_LONG).show());
+                }).start();
+                return true;
             });
 
             EditTextSwitchPreference manualLocationValue = findPreference("manual_location_value");

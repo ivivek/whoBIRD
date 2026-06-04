@@ -49,5 +49,13 @@
     <string name="settings_sync_station_id_summary">Identifies this phone in the Pi DB</string>
     <string name="settings_sync_interval">Sync interval (seconds)</string>
     <string name="settings_sync_interval_summary">How often to push unsynced rows</string>
+    <string name="settings_sync_test">Test connection</string>
+    <string name="settings_sync_test_summary">Send an empty batch to the endpoint URL</string>
+    <string name="sync_test_running">Testing…</string>
+    <string name="sync_test_no_url">Enter the Pi endpoint URL first</string>
+    <string name="sync_test_ok">Connected — birdroid receiver is reachable</string>
+    <string name="sync_test_wrong_server">Server reached, but it does not look like the birdroid receiver (HTTP %1$d)</string>
+    <string name="sync_test_http_error">Server error: HTTP %1$d</string>
+    <string name="sync_test_failed">Connection failed: %1$s</string>
 </resources>
 
