@@ -57,8 +57,40 @@ public class LocationHelper {
         if (System.currentTimeMillis() - oldLocationTime > 3 * 60 * 1000) {oldLocation = null; oldLocationTime = 0;}  //location older than 3 min -> reset
         else soundClassifier.runMetaInterpreter(oldLocation);
 
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED && checkLocationProvider(context)) {
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "location permission not granted — cannot request fixes");
+            return;
+        }
+        if (checkLocationProvider(context)) {
             LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+            Log.i(TAG, "providers: gps=" + locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    + " network=" + locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER));
+
+            // Seed from the freshest cached fix so the location filter is active immediately
+            // instead of waiting minutes for a cold GPS fix (or forever, indoors).
+            if (oldLocation == null) {
+                Location seed = null;
+                for (String provider : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+                    try {
+                        Location l = locationManager.getLastKnownLocation(provider);
+                        Log.i(TAG, "getLastKnownLocation(" + provider + ") = " + (l == null ? "null" : (l.getTime() + " age " + (System.currentTimeMillis() - l.getTime()) / 1000 + "s")));
+                        if (l != null && (seed == null || l.getTime() > seed.getTime())) seed = l;
+                    } catch (Exception e) {
+                        Log.w(TAG, "getLastKnownLocation(" + provider + ") threw: " + e);
+                    }
+                }
+                if (seed != null) {
+                    Log.i(TAG, "seeding location filter from cached " + seed.getProvider() + " fix");
+                    preciseLocation = seed;
+                    Location roundLoc = new Location(seed);
+                    roundLoc.setLatitude(Math.round(seed.getLatitude() * 100.0) / 100.0);
+                    roundLoc.setLongitude(Math.round(seed.getLongitude() * 100.0) / 100.0);
+                    oldLocation = roundLoc;
+                    oldLocationTime = System.currentTimeMillis();
+                    soundClassifier.runMetaInterpreter(roundLoc);
+                }
+            }
+
             if (locationListenerGPS==null) locationListenerGPS = new LocationListener() {
                 @Override
                 public void onLocationChanged(Location location) {
@@ -89,13 +121,20 @@ public class LocationHelper {
                 public void onProviderDisabled(String provider) {
                 }
             };
-            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5000, 0, locationListenerGPS);
+            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER))
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5000, 0, locationListenerGPS);
+            // Network provider delivers a (coarser) fix much faster and works indoors —
+            // plenty for the meta model, which rounds to ~1 km anyway. A later GPS fix
+            // simply re-runs the meta model with better coordinates.
+            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER))
+                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 5000, 0, locationListenerGPS);
         }
     }
 
     public static boolean checkLocationProvider(Context context) {
         LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-        if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)){
+        if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                && !locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)){
             Toast.makeText(context, "Error no GPS", Toast.LENGTH_SHORT).show();
             return false;
         } else {
