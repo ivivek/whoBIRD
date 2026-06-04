@@ -56,7 +56,7 @@ class MainActivity : BaseActivity() {
       soundClassifier = birdNetService?.soundClassifier
       soundClassifier?.attachBinding(binding)
       // Reflect current running state in the FAB / progress bar.
-      val running = soundClassifier?.isRunning ?: true
+      val running = !(soundClassifier?.isPaused ?: false)
       binding.progressHorizontal.setIndeterminate(running)
       binding.fab.setImageDrawable(
         ContextCompat.getDrawable(
@@ -115,7 +115,7 @@ class MainActivity : BaseActivity() {
       if (binding.progressHorizontal.isIndeterminate) {
         binding.progressHorizontal.setIndeterminate(false)
         binding.fab.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_record_24dp))
-        soundClassifier?.isRunning = false
+        soundClassifier?.isPaused = true
         if (binding.icon.visibility == View.VISIBLE && sharedPref.getBoolean("show_spectrogram", false)){
           binding.rangeSlider.visibility = View.VISIBLE
           binding.runRecognizerButton.visibility = View.VISIBLE
@@ -126,7 +126,7 @@ class MainActivity : BaseActivity() {
       else {
         binding.progressHorizontal.setIndeterminate(true)
         binding.fab.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_pause_24dp))
-        soundClassifier?.isRunning = true
+        soundClassifier?.isPaused = false
         binding.rangeSlider.visibility = View.GONE
         binding.runRecognizerButton.visibility = View.GONE
         binding.resetButton.visibility = View.GONE

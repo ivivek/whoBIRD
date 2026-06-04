@@ -72,9 +72,6 @@ class SoundClassifier(
   var mBinding: ActivityMainBinding? = null
   private var database: BirdDBHelper? = null
 
-  /** When headless (no binding), defaults to true so the service keeps detecting. When a binding is attached, the FAB controls this via setRunning(). */
-  var isRunning: Boolean = true
-
   /** Cached meta-model influence (0..1). Updated from the slider when a binding is attached; otherwise sticks at last known value. */
   private var metaInfluence: Float = 0.6f
 
@@ -571,10 +568,8 @@ class SoundClassifier(
         return@task
       }
 
-      if (isRunning) {   //gate set by FAB when bound, or always true when headless
-        inputBufferSnapshot = deepCopy(inputBuffer) //create independent snapshot of inputBuffer
-        recognizeAndDisplay(inputBufferSnapshot)
-      }
+      inputBufferSnapshot = deepCopy(inputBuffer) //create independent snapshot of inputBuffer
+      recognizeAndDisplay(inputBufferSnapshot)
     }
   }
 
