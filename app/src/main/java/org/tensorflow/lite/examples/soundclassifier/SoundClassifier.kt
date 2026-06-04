@@ -191,6 +191,21 @@ class SoundClassifier(
    * `recordingThread` and `recognitionThread`.
    */
   fun start() {
+    // Seed the location filter from the last persisted fix so a service restart (e.g.
+    // START_STICKY revival with the activity closed) doesn't sit unfiltered/gated waiting
+    // for a GPS fix nobody is requesting. A stationary station makes this a safe default;
+    // a fresh fix re-runs the meta model as soon as one arrives.
+    if (!locationReady) {
+      val prefs = PreferenceManager.getDefaultSharedPreferences(mContext)
+      val lastLat = prefs.getFloat(PREF_LAST_LAT, 0f)
+      val lastLon = prefs.getFloat(PREF_LAST_LON, 0f)
+      if (lastLat != 0f || lastLon != 0f) {
+        runMetaInterpreter(Location("cache").apply {
+          latitude = lastLat.toDouble()
+          longitude = lastLon.toDouble()
+        })
+      }
+    }
     if (!isPaused) {
       startAudioRecord()
     }
@@ -430,6 +445,8 @@ class SoundClassifier(
       }
     }
 
+    // Remember the fix across process restarts and unblock the recognition loop.
+    sharedPref.edit().putFloat(PREF_LAST_LAT, lat).putFloat(PREF_LAST_LON, lon).apply()
     locationReady = true
     Log.i(TAG, "location filter active — detections unblocked")
   }
@@ -757,6 +774,8 @@ class SoundClassifier(
 
   companion object {
     private const val TAG = "SoundClassifier"
+    private const val PREF_LAST_LAT = "last_fix_lat"
+    private const val PREF_LAST_LON = "last_fix_lon"
     var lat: Float = 0.0f
     var lon: Float = 0.0f
     /** Number of nanoseconds in a millisecond  */
