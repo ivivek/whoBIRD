@@ -65,16 +65,36 @@ import kotlin.math.sin
  */
 class SoundClassifier(
   context: Context,
-  binding: ActivityMainBinding,
   private val options: Options = Options()
 ) {
   internal var mContext: Context
-  internal var mBinding: ActivityMainBinding
+  /** Optional UI binding. When null, the classifier runs headless (e.g. inside BirdNETService with no Activity attached). */
+  var mBinding: ActivityMainBinding? = null
   private var database: BirdDBHelper? = null
+
+  /** When headless (no binding), defaults to true so the service keeps detecting. When a binding is attached, the FAB controls this via setRunning(). */
+  var isRunning: Boolean = true
+
+  /** Cached meta-model influence (0..1). Updated from the slider when a binding is attached; otherwise sticks at last known value. */
+  private var metaInfluence: Float = 0.6f
+
   init {
     this.mContext = context.applicationContext
-    this.mBinding = binding
     this.database = BirdDBHelper.getInstance(mContext)
+    val sharedPref = PreferenceManager.getDefaultSharedPreferences(mContext)
+    metaInfluence = sharedPref.getFloat("meta_model_influence", 60.0f) / 100.0f
+  }
+
+  fun attachBinding(binding: ActivityMainBinding) {
+    mBinding = binding
+  }
+
+  fun detachBinding() {
+    mBinding = null
+  }
+
+  fun setMetaInfluence(percent: Float) {
+    metaInfluence = percent / 100.0f
   }
   class Options(
     /** Path of the converted model label file, relative to the assets/ directory.  */
@@ -335,8 +355,10 @@ class SoundClassifier(
     lon = location.longitude.toFloat()
 
     Handler(Looper.getMainLooper()).post {
-      mBinding.gps.setText(mContext.getString(R.string.latitude)+": " + (round(lat*100.0)/100.0).toString() + " / " + mContext.getString(R.string.longitude) + ": " + (round(lon*100.0)/100).toString())
-      mBinding.metaInfluenceSlider.isEnabled = true
+      mBinding?.let { b ->
+        b.gps.setText(mContext.getString(R.string.latitude)+": " + (round(lat*100.0)/100.0).toString() + " / " + mContext.getString(R.string.longitude) + ": " + (round(lon*100.0)/100).toString())
+        b.metaInfluenceSlider.isEnabled = true
+      }
     }
 
     val metaOutputBuffer = FloatBuffer.allocate(metaModelNumClasses)
@@ -549,10 +571,8 @@ class SoundClassifier(
         return@task
       }
 
-      if (mBinding.progressHorizontal.isIndeterminate) {   //if start/stop button set to "running"
-
+      if (isRunning) {   //gate set by FAB when bound, or always true when headless
         inputBufferSnapshot = deepCopy(inputBuffer) //create independent snapshot of inputBuffer
-
         recognizeAndDisplay(inputBufferSnapshot)
       }
     }
@@ -569,22 +589,22 @@ class SoundClassifier(
     outputBuffer.rewind()
     outputBuffer.get(predictionProbs) // Copy data to predictionProbs.
 
-    val metaInfluence = mBinding.metaInfluenceSlider.value / 100.0f
+    val mi = metaInfluence
 
     val probList = mutableListOf<Float>()
     for (i in predictionProbs.indices) {
       val modelProb = 1 / (1 + exp(-predictionProbs[i])) //apply sigmoid
-      probList.add(modelProb*(1-metaInfluence + metaInfluence* metaPredictionProbs[i]))
+      probList.add(modelProb*(1-mi + mi* metaPredictionProbs[i]))
     }
 
     probList.withIndex().also {
       val max = it.maxByOrNull { entry -> entry.value }
       val timeInMillis = System.currentTimeMillis()
-      updateTextView(max, mBinding.text1, timeInMillis)
+      updateTextView(max, mBinding?.text1, timeInMillis)
       updateImage(max)
       //after finding the maximum probability and its corresponding label (max), we filter out that entry from the list of entries before finding the second highest probability (secondMax)
       val secondMax = it.filterNot { entry -> entry == max }.maxByOrNull { entry -> entry.value }
-      updateTextView(secondMax, mBinding.text2, timeInMillis)
+      updateTextView(secondMax, mBinding?.text2, timeInMillis)
     }
 
     latestPredictionLatencyMs =
@@ -592,6 +612,7 @@ class SoundClassifier(
   }
 
   private fun updateImage(max: IndexedValue<Float>?) {
+    val b = mBinding ?: return  // no UI attached → nothing to draw
     val sharedPref = PreferenceManager.getDefaultSharedPreferences(mContext)
     if (sharedPref.getBoolean("show_images", false)){
       Handler(Looper.getMainLooper()).post {
@@ -600,76 +621,82 @@ class SoundClassifier(
           if (max!!.value > options.displayImageThreshold && assetList[max.index] != "NO_ASSET") {
             "https://macaulaylibrary.org/asset/" + assetList[max.index] + "/embed"
           } else {
-            mBinding.webview.url
+            b.webview.url
           }
 
         if (url == null || url == "about:blank") {
-          mBinding.webview.setVisibility(View.GONE)
-          mBinding.icon.setVisibility(View.VISIBLE)
-          mBinding.icon.setScaleType(ScaleType.CENTER)
-          mBinding.icon.setImageDrawable(ContextCompat.getDrawable(mContext, R.drawable.icon_large))
-          mBinding.webviewUrl.setText("")
-          mBinding.webviewUrl.setVisibility(View.GONE)
-          mBinding.webviewName.setText("")
-          mBinding.webviewName.setVisibility(View.GONE)
-          mBinding.webviewLatinname.setText("")
-          mBinding.webviewLatinname.setVisibility(View.GONE)
-          mBinding.webviewReload.setVisibility(View.GONE)
+          b.webview.setVisibility(View.GONE)
+          b.icon.setVisibility(View.VISIBLE)
+          b.icon.setScaleType(ScaleType.CENTER)
+          b.icon.setImageDrawable(ContextCompat.getDrawable(mContext, R.drawable.icon_large))
+          b.webviewUrl.setText("")
+          b.webviewUrl.setVisibility(View.GONE)
+          b.webviewName.setText("")
+          b.webviewName.setVisibility(View.GONE)
+          b.webviewLatinname.setText("")
+          b.webviewLatinname.setVisibility(View.GONE)
+          b.webviewReload.setVisibility(View.GONE)
         } else {
-          if (mBinding.webview.url != url) {
-            mBinding.webview.setVisibility(View.INVISIBLE)
-            mBinding.webview.settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK)
-            mBinding.webview.loadUrl("javascript:document.open();document.close();")  //clear view
-            mBinding.webview.loadUrl(url)
-            mBinding.webviewUrl.setText(url)
-            mBinding.webviewUrl.setVisibility(View.VISIBLE)
-            mBinding.webviewName.setText(labelList[max.index].split("_").last())
-            mBinding.webviewLatinname.setText(labelList[max.index].split("_").first())
-            mBinding.webviewLatinname.setVisibility(View.VISIBLE)
-            mBinding.webviewName.setVisibility(View.VISIBLE)
-            mBinding.webviewReload.setVisibility(View.VISIBLE)
-            mBinding.icon.setVisibility(View.GONE)
+          if (b.webview.url != url) {
+            b.webview.setVisibility(View.INVISIBLE)
+            b.webview.settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK)
+            b.webview.loadUrl("javascript:document.open();document.close();")  //clear view
+            b.webview.loadUrl(url)
+            b.webviewUrl.setText(url)
+            b.webviewUrl.setVisibility(View.VISIBLE)
+            b.webviewName.setText(labelList[max.index].split("_").last())
+            b.webviewLatinname.setText(labelList[max.index].split("_").first())
+            b.webviewLatinname.setVisibility(View.VISIBLE)
+            b.webviewName.setVisibility(View.VISIBLE)
+            b.webviewReload.setVisibility(View.VISIBLE)
+            b.icon.setVisibility(View.GONE)
           }
         }
       }
     } else {
       Handler(Looper.getMainLooper()).post {
-        mBinding.webview.setVisibility(View.GONE)
-        mBinding.icon.setVisibility(View.VISIBLE)
-        mBinding.webview.loadUrl("about:blank")
-        mBinding.webviewUrl.setText("")
-        mBinding.webviewUrl.setVisibility(View.GONE)
-        mBinding.webviewName.setText("")
-        mBinding.webviewName.setVisibility(View.GONE)
-        mBinding.webviewLatinname.setText("")
-        mBinding.webviewLatinname.setVisibility(View.GONE)
-        mBinding.webviewReload.setVisibility(View.GONE)
+        b.webview.setVisibility(View.GONE)
+        b.icon.setVisibility(View.VISIBLE)
+        b.webview.loadUrl("about:blank")
+        b.webviewUrl.setText("")
+        b.webviewUrl.setVisibility(View.GONE)
+        b.webviewName.setText("")
+        b.webviewName.setVisibility(View.GONE)
+        b.webviewLatinname.setText("")
+        b.webviewLatinname.setVisibility(View.GONE)
+        b.webviewReload.setVisibility(View.GONE)
         if (sharedPref.getBoolean("show_spectrogram", false)){
-          mBinding.icon.setImageBitmap(MelSpectrogram.getMelBitmap(recognizerWorkingBuffer.duplicate(), options.sampleRate, !mBinding.progressHorizontal.isIndeterminate))
-          mBinding.icon.setScaleType(ScaleType.FIT_XY)
+          b.icon.setImageBitmap(MelSpectrogram.getMelBitmap(recognizerWorkingBuffer.duplicate(), options.sampleRate, !b.progressHorizontal.isIndeterminate))
+          b.icon.setScaleType(ScaleType.FIT_XY)
         }
       }
     }
   }
 
-  private fun updateTextView(element: IndexedValue<Float>?, tv: TextView, timeInMillis: Long) {
+  private fun updateTextView(element: IndexedValue<Float>?, tv: TextView?, timeInMillis: Long) {
     val sharedPref = PreferenceManager.getDefaultSharedPreferences(mContext)
     if (element != null && element.value > sharedPref.getInt("model_threshold", 30)/100.0) {
       val label =
         labelList[element.index].split("_").last()  //show in locale language
-      Handler(Looper.getMainLooper()).post {
-        tv.setText(label + "  " + Math.round(element.value * 100.0) + "%")
-        if (element.value < 0.3) tv.setBackgroundResource(R.drawable.oval_red_dotted)
-        else if (element.value < 0.5) tv.setBackgroundResource(R.drawable.oval_red)
-        else if (element.value < 0.65) tv.setBackgroundResource(R.drawable.oval_orange)
-        else if (element.value < 0.8) tv.setBackgroundResource(R.drawable.oval_yellow)
-        else tv.setBackgroundResource(R.drawable.oval_green)
-        val currentLocation = LocationHelper.getPreciseLocation()
-        database?.addEntry(label, currentLocation.latitude.toFloat(), currentLocation.longitude.toFloat(), element.index, element.value, timeInMillis)
-        if (sharedPref.getBoolean("write_wav",false)) WavUtils.createWaveFile(timeInMillis, recognizerWorkingBuffer.duplicate(), options.sampleRate,1,2)
-        if (sharedPref.getBoolean("play_sound",false)) PlayNotification.playSound(mContext);
+
+      // Side-effects that must happen even when headless: DB write, optional WAV, optional sound.
+      val currentLocation = LocationHelper.getPreciseLocation()
+      database?.addEntry(label, currentLocation.latitude.toFloat(), currentLocation.longitude.toFloat(), element.index, element.value, timeInMillis)
+      if (sharedPref.getBoolean("write_wav",false)) WavUtils.createWaveFile(timeInMillis, recognizerWorkingBuffer.duplicate(), options.sampleRate,1,2)
+      if (sharedPref.getBoolean("play_sound",false)) PlayNotification.playSound(mContext)
+
+      // UI update only if a binding is attached.
+      if (tv != null) {
+        Handler(Looper.getMainLooper()).post {
+          tv.setText(label + "  " + Math.round(element.value * 100.0) + "%")
+          if (element.value < 0.3) tv.setBackgroundResource(R.drawable.oval_red_dotted)
+          else if (element.value < 0.5) tv.setBackgroundResource(R.drawable.oval_red)
+          else if (element.value < 0.65) tv.setBackgroundResource(R.drawable.oval_orange)
+          else if (element.value < 0.8) tv.setBackgroundResource(R.drawable.oval_yellow)
+          else tv.setBackgroundResource(R.drawable.oval_green)
+        }
       }
-    } else {
+    } else if (tv != null) {
       Handler(Looper.getMainLooper()).post {
         tv.setText("")
         tv.setBackgroundResource(0)

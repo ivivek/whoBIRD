@@ -18,13 +18,16 @@
 package org.tensorflow.lite.examples.soundclassifier
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.util.DisplayMetrics
 import android.view.Menu
 import android.view.MenuItem
@@ -41,8 +44,36 @@ import org.woheller69.freeDroidWarn.FreeDroidWarn
 
 class MainActivity : BaseActivity() {
 
-  private lateinit var soundClassifier: SoundClassifier
+  private var soundClassifier: SoundClassifier? = null
+  private var birdNetService: BirdNETService? = null
+  private var serviceBound: Boolean = false
   private lateinit var binding: ActivityMainBinding
+
+  private val serviceConnection = object : ServiceConnection {
+    override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+      val localBinder = service as BirdNETService.LocalBinder
+      birdNetService = localBinder.getService()
+      soundClassifier = birdNetService?.soundClassifier
+      soundClassifier?.attachBinding(binding)
+      // Reflect current running state in the FAB / progress bar.
+      val running = soundClassifier?.isRunning ?: true
+      binding.progressHorizontal.setIndeterminate(running)
+      binding.fab.setImageDrawable(
+        ContextCompat.getDrawable(
+          this@MainActivity,
+          if (running) R.drawable.ic_pause_24dp else R.drawable.ic_record_24dp
+        )
+      )
+      // Kick GPS now that we have the classifier reference.
+      LocationHelper.requestLocation(this@MainActivity, soundClassifier!!)
+    }
+
+    override fun onServiceDisconnected(name: ComponentName?) {
+      soundClassifier?.detachBinding()
+      soundClassifier = null
+      birdNetService = null
+    }
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -75,7 +106,6 @@ class MainActivity : BaseActivity() {
 
     binding.rangeSlider.labelBehavior = LABEL_GONE
 
-    soundClassifier = SoundClassifier(this, binding, SoundClassifier.Options())
     binding.gps.setText(getString(R.string.latitude)+": --.-- / " + getString(R.string.longitude) + ": --.--" )
     binding.webview.setWebViewClient(object : MlWebViewClient(this) {})
     binding.webview.settings.setDomStorageEnabled(true)
@@ -85,6 +115,7 @@ class MainActivity : BaseActivity() {
       if (binding.progressHorizontal.isIndeterminate) {
         binding.progressHorizontal.setIndeterminate(false)
         binding.fab.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_record_24dp))
+        soundClassifier?.isRunning = false
         if (binding.icon.visibility == View.VISIBLE && sharedPref.getBoolean("show_spectrogram", false)){
           binding.rangeSlider.visibility = View.VISIBLE
           binding.runRecognizerButton.visibility = View.VISIBLE
@@ -95,6 +126,7 @@ class MainActivity : BaseActivity() {
       else {
         binding.progressHorizontal.setIndeterminate(true)
         binding.fab.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_pause_24dp))
+        soundClassifier?.isRunning = true
         binding.rangeSlider.visibility = View.GONE
         binding.runRecognizerButton.visibility = View.GONE
         binding.resetButton.visibility = View.GONE
@@ -126,12 +158,36 @@ class MainActivity : BaseActivity() {
       val editor=sharedPref.edit()
       editor.putFloat("meta_model_influence", value)
       editor.apply()
+      soundClassifier?.setMetaInfluence(value)
     }
     FreeDroidWarn.showWarningOnUpgrade(this, BuildConfig.VERSION_CODE)
     if (GithubStar.shouldShowStarDialog(this)) GithubStar.starDialog(this, "https://github.com/woheller69/whoBIRD")
 
     requestPermissions()
 
+  }
+
+  override fun onStart() {
+    super.onStart()
+    if (checkMicrophonePermission()) {
+      val svcIntent = Intent(this, BirdNETService::class.java)
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        startForegroundService(svcIntent)
+      } else {
+        startService(svcIntent)
+      }
+      bindService(svcIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+      serviceBound = true
+    }
+  }
+
+  override fun onStop() {
+    super.onStop()
+    if (serviceBound) {
+      soundClassifier?.detachBinding()
+      unbindService(serviceConnection)
+      serviceBound = false
+    }
   }
 
   override fun onResume() {
@@ -147,13 +203,11 @@ class MainActivity : BaseActivity() {
       audioManager.isBluetoothScoOn = false
     }
 
-    LocationHelper.requestLocation(this, soundClassifier)
+    soundClassifier?.let { LocationHelper.requestLocation(this, it) }
     if (!checkLocationPermission()){
       Toast.makeText(this, this.resources.getString(R.string.error_location_permission), Toast.LENGTH_SHORT).show()
     }
-    if (checkMicrophonePermission()){
-      soundClassifier.start()
-    } else {
+    if (!checkMicrophonePermission()){
       Toast.makeText(this, this.resources.getString(R.string.error_audio_permission), Toast.LENGTH_SHORT).show()
     }
     keepScreenOn(true)
@@ -162,7 +216,6 @@ class MainActivity : BaseActivity() {
   override fun onPause() {
     super.onPause()
     LocationHelper.stopLocation(this)
-    if (soundClassifier.isRecording) soundClassifier.stop()
     val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
     audioManager.stopBluetoothSco()
     audioManager.isBluetoothScoOn = false
@@ -203,6 +256,11 @@ class MainActivity : BaseActivity() {
       && ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
       && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         perms.add(Manifest.permission.BLUETOOTH_CONNECT)
+    }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+      && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        perms.add(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     if (!perms.isEmpty()) requestPermissions(perms.toTypedArray(), REQUEST_PERMISSIONS)
@@ -249,6 +307,7 @@ class MainActivity : BaseActivity() {
   }
 
   fun runRecognizer(view: View) {
+    val classifier = soundClassifier ?: return
     if (view == binding.resetButton) binding.rangeSlider.values = mutableListOf(0.0f, 100.0f)
 
     binding.text1.setText("")
@@ -256,7 +315,7 @@ class MainActivity : BaseActivity() {
     binding.text2.setText("")
     binding.text2.setBackgroundResource(0)
 
-    val buffer = soundClassifier.getInputBufferSnapshot()
+    val buffer = classifier.getInputBufferSnapshot()
     val N: Int = buffer.capacity()
     // Ensure minPercentage <= maxPercentage
     val currentValues = binding.rangeSlider.values
@@ -274,7 +333,7 @@ class MainActivity : BaseActivity() {
         buffer.put(i, 0.0f)
       }
     }
-  soundClassifier.recognizeAndDisplay(buffer)
+    classifier.recognizeAndDisplay(buffer)
   }
 
 }
