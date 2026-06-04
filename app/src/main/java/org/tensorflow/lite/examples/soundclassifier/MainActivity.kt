@@ -116,6 +116,9 @@ class MainActivity : BaseActivity() {
         binding.progressHorizontal.setIndeterminate(false)
         binding.fab.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_record_24dp))
         soundClassifier?.isPaused = true
+        // Drop the persistent notification + foreground state — the service stays alive
+        // (started, bound), it just stops claiming a status-bar slot. Mic is already released.
+        birdNetService?.setForegroundActive(false)
         if (binding.icon.visibility == View.VISIBLE && sharedPref.getBoolean("show_spectrogram", false)){
           binding.rangeSlider.visibility = View.VISIBLE
           binding.runRecognizerButton.visibility = View.VISIBLE
@@ -126,6 +129,9 @@ class MainActivity : BaseActivity() {
       else {
         binding.progressHorizontal.setIndeterminate(true)
         binding.fab.setImageDrawable(ContextCompat.getDrawable(this, R.drawable.ic_pause_24dp))
+        // Re-enter foreground BEFORE the classifier reopens AudioRecord, so the
+        // microphone access is properly attributed to a foreground service.
+        birdNetService?.setForegroundActive(true)
         soundClassifier?.isPaused = false
         binding.rangeSlider.visibility = View.GONE
         binding.runRecognizerButton.visibility = View.GONE
@@ -171,11 +177,11 @@ class MainActivity : BaseActivity() {
     super.onStart()
     if (checkMicrophonePermission()) {
       val svcIntent = Intent(this, BirdNETService::class.java)
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        startForegroundService(svcIntent)
-      } else {
-        startService(svcIntent)
-      }
+      // Use plain startService — activity is in foreground here so this is allowed.
+      // The service decides its own foreground state via setForegroundActive() so a
+      // "paused" service doesn't get force-promoted back to foreground (and the notification
+      // shown again) just because the user opened the app.
+      startService(svcIntent)
       bindService(svcIntent, serviceConnection, Context.BIND_AUTO_CREATE)
       serviceBound = true
     }

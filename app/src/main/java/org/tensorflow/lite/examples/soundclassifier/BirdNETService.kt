@@ -60,6 +60,28 @@ class BirdNETService : Service() {
     return START_STICKY
   }
 
+  /**
+   * Toggle foreground mode. When `active` is false, the persistent notification disappears and
+   * the service drops to a started-but-background state — still alive, but lower priority and
+   * with no UI indicator. Called from MainActivity on FAB pause/resume so a "paused" service
+   * doesn't leave a misleading "BirdNET is listening" notification on the lock screen.
+   *
+   * Caveat: in background mode the service can be killed under memory pressure. START_STICKY
+   * will bring it back, but if you care about uninterrupted listening, stay in foreground mode.
+   */
+  fun setForegroundActive(active: Boolean) {
+    if (active) {
+      startInForeground()
+    } else {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+      } else {
+        @Suppress("DEPRECATION")
+        stopForeground(true)
+      }
+    }
+  }
+
   override fun onBind(intent: Intent?): IBinder = binder
 
   override fun onDestroy() {
