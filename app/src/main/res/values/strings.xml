@@ -40,5 +40,14 @@
     <string name="notification_channel_listening_desc">Persistent notification while the background detector is running</string>
     <string name="notification_listening_title">BirdNET is listening</string>
     <string name="notification_listening_text">Tap to open dashboard</string>
+    <string name="settings_sync_category">Sync to Pi</string>
+    <string name="settings_sync_enabled">Enable sync</string>
+    <string name="settings_sync_enabled_summary">Push detections to a Raspberry Pi over HTTP</string>
+    <string name="settings_sync_pi_url">Pi endpoint URL</string>
+    <string name="settings_sync_pi_url_summary">e.g. http://100.x.x.x:5000/api/detections</string>
+    <string name="settings_sync_station_id">Station ID</string>
+    <string name="settings_sync_station_id_summary">Identifies this phone in the Pi DB</string>
+    <string name="settings_sync_interval">Sync interval (seconds)</string>
+    <string name="settings_sync_interval_summary">How often to push unsynced rows</string>
 </resources>
 

@@ -84,4 +84,35 @@
         android:key="language"
         android:layout="@layout/language_button"/>
 
+    <PreferenceCategory android:title="@string/settings_sync_category">
+
+        <SwitchPreferenceCompat
+            android:key="sync_enabled"
+            android:title="@string/settings_sync_enabled"
+            android:summary="@string/settings_sync_enabled_summary"
+            android:defaultValue="false" />
+
+        <EditTextPreference
+            android:key="sync_pi_url"
+            android:title="@string/settings_sync_pi_url"
+            android:summary="@string/settings_sync_pi_url_summary"
+            android:defaultValue=""
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            android:key="sync_station_id"
+            android:title="@string/settings_sync_station_id"
+            android:summary="@string/settings_sync_station_id_summary"
+            android:defaultValue="phone-1"
+            app:useSimpleSummaryProvider="true" />
+
+        <EditTextPreference
+            android:key="sync_interval_sec"
+            android:title="@string/settings_sync_interval"
+            android:summary="@string/settings_sync_interval_summary"
+            android:defaultValue="30"
+            app:useSimpleSummaryProvider="true" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

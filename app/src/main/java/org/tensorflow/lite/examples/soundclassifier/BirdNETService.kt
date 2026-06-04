@@ -34,11 +34,15 @@ class BirdNETService : Service() {
   lateinit var soundClassifier: SoundClassifier
     private set
 
+  /** Pushes new detections to the configured Pi over HTTP. */
+  private lateinit var syncWorker: SyncWorker
+
   override fun onCreate() {
     super.onCreate()
     Log.i(TAG, "BirdNETService onCreate")
 
     soundClassifier = SoundClassifier(applicationContext, SoundClassifier.Options())
+    syncWorker = SyncWorker(applicationContext)
 
     val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
     wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "birdnet:listening").apply {
@@ -48,6 +52,7 @@ class BirdNETService : Service() {
 
     startInForeground()
     soundClassifier.start()
+    syncWorker.start()
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -59,6 +64,7 @@ class BirdNETService : Service() {
 
   override fun onDestroy() {
     Log.i(TAG, "BirdNETService onDestroy")
+    if (::syncWorker.isInitialized) syncWorker.stop()
     if (::soundClassifier.isInitialized && soundClassifier.isRecording) {
       soundClassifier.stop()
     }

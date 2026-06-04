@@ -11,7 +11,7 @@ public class BirdDBHelper extends SQLiteOpenHelper {
 
     // Database name and table columns
     private static final String DB_NAME = "BirdDatabase.db";
-    private static final int DATABASE_VERSION = 1;
+    private static final int DATABASE_VERSION = 2;
     public static final String TABLE_NAME = "BirdObservations";
     private static final String COLUMN_ID = "ID";
     private static final String COLUMN_MILLIS = "TimeInMillis";
@@ -20,6 +20,7 @@ public class BirdDBHelper extends SQLiteOpenHelper {
     private static final String COLUMN_NAME = "SpeciesName";
     private static final String COLUMN_SPECIES_ID = "BirdNET_ID";
     private static final String COLUMN_PROBABILITY = "Probability";
+    private static final String COLUMN_SYNCED = "Synced";
     private static BirdDBHelper instance = null;
     
     public BirdDBHelper(Context context) {
@@ -36,15 +37,19 @@ public class BirdDBHelper extends SQLiteOpenHelper {
                 COLUMN_LONGITUDE + " FLOAT," +
                 COLUMN_NAME + " TEXT," +
                 COLUMN_SPECIES_ID + " INTEGER," +
-                COLUMN_PROBABILITY + " FLOAT);";
+                COLUMN_PROBABILITY + " FLOAT," +
+                COLUMN_SYNCED + " INTEGER NOT NULL DEFAULT 0);";
         db.execSQL(CREATE_TABLE);
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_"+TABLE_NAME+"_synced ON "+TABLE_NAME+"("+COLUMN_SYNCED+");");
     }
-    
+
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        // Drop the table and create it again if there's a version change in the database schema.
-        db.execSQL("DROP TABLE IF EXISTS "+TABLE_NAME);
-        this.onCreate(db);
+        // v1 -> v2: additive column. Preserve existing detection history.
+        if (oldVersion < 2) {
+            db.execSQL("ALTER TABLE "+TABLE_NAME+" ADD COLUMN "+COLUMN_SYNCED+" INTEGER NOT NULL DEFAULT 0;");
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_"+TABLE_NAME+"_synced ON "+TABLE_NAME+"("+COLUMN_SYNCED+");");
+        }
     }
     
     public synchronized void addEntry(String name, float latitude, float longitude, int speciesId, float probability, long timeInMillis) {
@@ -142,5 +147,51 @@ public class BirdDBHelper extends SQLiteOpenHelper {
             instance = new BirdDBHelper(context.getApplicationContext());
         }
         return instance;
+    }
+
+    /** Fetch up to `limit` unsynced rows, oldest first. Returns empty list if none. */
+    public synchronized List<BirdObservation> getUnsyncedBatch(int limit) {
+        SQLiteDatabase db = getReadableDatabase();
+        String sql = "SELECT * FROM " + TABLE_NAME + " WHERE " + COLUMN_SYNCED + " = 0 ORDER BY " + COLUMN_ID + " ASC LIMIT " + limit;
+        Cursor cursor = db.rawQuery(sql, null);
+        List<BirdObservation> out = new ArrayList<>();
+        if (cursor.moveToFirst()) {
+            do {
+                BirdObservation o = new BirdObservation();
+                o.setId(cursor.getInt(0));
+                o.setMillis(cursor.getLong(1));
+                o.setLatitude(cursor.getFloat(2));
+                o.setLongitude(cursor.getFloat(3));
+                o.setName(cursor.getString(4));
+                o.setSpeciesId(cursor.getInt(5));
+                o.setProbability(cursor.getFloat(6));
+                out.add(o);
+            } while (cursor.moveToNext());
+        }
+        cursor.close();
+        return out;
+    }
+
+    /** Mark the given row IDs as synced. */
+    public synchronized void markSynced(List<Integer> ids) {
+        if (ids.isEmpty()) return;
+        SQLiteDatabase db = getWritableDatabase();
+        StringBuilder placeholders = new StringBuilder();
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) placeholders.append(',');
+            placeholders.append('?');
+        }
+        String[] args = new String[ids.size()];
+        for (int i = 0; i < ids.size(); i++) args[i] = String.valueOf(ids.get(i));
+        db.execSQL("UPDATE " + TABLE_NAME + " SET " + COLUMN_SYNCED + " = 1 WHERE " + COLUMN_ID + " IN (" + placeholders + ")", args);
+    }
+
+    public synchronized int getUnsyncedCount() {
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT COUNT(*) FROM " + TABLE_NAME + " WHERE " + COLUMN_SYNCED + " = 0", null);
+        int n = 0;
+        if (c.moveToFirst()) n = c.getInt(0);
+        c.close();
+        return n;
     }
 }
