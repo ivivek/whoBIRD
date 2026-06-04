@@ -49,6 +49,7 @@
     <string name="settings_sync_station_id_summary">Identifies this phone in the Pi DB</string>
     <string name="settings_sync_interval">Sync interval (seconds)</string>
     <string name="settings_sync_interval_summary">How often to push unsynced rows</string>
+    <string name="waiting_for_location">Waiting for location fix…</string>
     <string name="settings_sync_test">Test connection</string>
     <string name="settings_sync_test_summary">Send an empty batch to the endpoint URL</string>
     <string name="sync_test_running">Testing…</string>

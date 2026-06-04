@@ -115,6 +115,16 @@ class SoundClassifier(
   var isRecording: Boolean = false
     private set
 
+  /**
+   * True once the meta model has run with a real location (GPS fix, manual setting, or the
+   * persisted last fix). Until then the location filter is a no-op (all-1 probabilities) and
+   * the recognition loop refuses to report detections — otherwise the model matches against
+   * the whole planet's species list and produces nonsense.
+   */
+  @Volatile
+  var locationReady: Boolean = false
+    private set
+
   var isClosed: Boolean = true
     private set
 
@@ -346,6 +356,13 @@ class SoundClassifier(
   }
 
   fun runMetaInterpreter(location: Location) {
+    // (0,0) is the "no fix yet" sentinel (also the untouched manual-location default) —
+    // running the meta model for a spot in the Atlantic would suppress everything.
+    if (location.latitude == 0.0 && location.longitude == 0.0) {
+      Log.w(TAG, "runMetaInterpreter: rejected 0/0 sentinel location")
+      return
+    }
+    Log.i(TAG, "runMetaInterpreter: running with a ${location.provider} location")
     val dayOfYear = LocalDate.now().dayOfYear
     val week = ceil( dayOfYear*48.0/366.0) //model year has 48 weeks
     lat = location.latitude.toFloat()
@@ -412,6 +429,9 @@ class SoundClassifier(
         metaPredictionProbs[i] = applyMetaThreshold(metaPredictionProbs[i])
       }
     }
+
+    locationReady = true
+    Log.i(TAG, "location filter active — detections unblocked")
   }
 
   private fun applyMetaThreshold(prob: Float): Float {
@@ -565,6 +585,21 @@ class SoundClassifier(
           Toast.makeText(mContext,mContext.resources.getString(R.string.samples_zero),Toast.LENGTH_SHORT).show()
         }
 
+        return@task
+      }
+
+      // Location is mandatory: without the meta filter every inference is unfiltered noise,
+      // so don't classify (and don't store) until a fix has arrived. Audio keeps buffering
+      // above, so the first classification after the fix uses real sound.
+      if (!locationReady) {
+        Handler(Looper.getMainLooper()).post {
+          mBinding?.let { b ->
+            b.text1.setText(mContext.getString(R.string.waiting_for_location))
+            b.text1.setBackgroundResource(0)
+            b.text2.setText("")
+            b.text2.setBackgroundResource(0)
+          }
+        }
         return@task
       }
 
