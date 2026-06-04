@@ -8,12 +8,14 @@ import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.Toast;
 
 import androidx.core.app.ActivityCompat;
 import androidx.preference.PreferenceManager;
 
 public class LocationHelper {
+    private static final String TAG = "LocationHelper";
     private static Location oldLocation;
     private static long oldLocationTime = 0;
     private static Location preciseLocation;
@@ -37,13 +39,19 @@ public class LocationHelper {
             String manualLocation = sharedPreferences.getString("manual_location_value", "0.000/0.000");
             String lat = manualLocation.split("/")[0];
             String lon = manualLocation.split("/")[1];
-            preciseLocation = new Location("GPS");
-            preciseLocation.setLatitude(Double.parseDouble(lat));
-            preciseLocation.setLongitude(Double.parseDouble(lon));
-            oldLocation = preciseLocation;
-            soundClassifier.runMetaInterpreter(oldLocation);
-            oldLocationTime = 0;
-            return;
+            // 0/0 is the never-configured placeholder — treat "manual location on but unset"
+            // as misconfiguration and fall through to GPS instead of silently doing nothing.
+            if (Double.parseDouble(lat) == 0.0 && Double.parseDouble(lon) == 0.0) {
+                Log.w(TAG, "manual_location enabled but value is unset (0/0) — falling back to GPS");
+            } else {
+                preciseLocation = new Location("GPS");
+                preciseLocation.setLatitude(Double.parseDouble(lat));
+                preciseLocation.setLongitude(Double.parseDouble(lon));
+                oldLocation = preciseLocation;
+                soundClassifier.runMetaInterpreter(oldLocation);
+                oldLocationTime = 0;
+                return;
+            }
         }
 
         if (System.currentTimeMillis() - oldLocationTime > 3 * 60 * 1000) {oldLocation = null; oldLocationTime = 0;}  //location older than 3 min -> reset
