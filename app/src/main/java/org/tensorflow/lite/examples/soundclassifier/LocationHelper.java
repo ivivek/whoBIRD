@@ -94,6 +94,7 @@ public class LocationHelper {
             if (locationListenerGPS==null) locationListenerGPS = new LocationListener() {
                 @Override
                 public void onLocationChanged(Location location) {
+                    Log.i(TAG, "onLocationChanged from " + location.getProvider());
                     preciseLocation = location;
                     Location roundLoc = new Location(location);
                     roundLoc.setLatitude(Math.round(location.getLatitude() * 100.0) / 100.0);
@@ -106,6 +107,12 @@ public class LocationHelper {
                         oldLocationTime = System.currentTimeMillis();
                         soundClassifier.runMetaInterpreter(roundLoc);
                     }
+                    // The station is stationary: one fresh fix per foreground session is
+                    // enough (it corrects the cached/persisted seed if the phone ever moved).
+                    // Stop streaming so the GPS radio doesn't run for nothing.
+                    Log.i(TAG, "fresh fix received — stopping location updates");
+                    locationManager.removeUpdates(this);
+                    locationListenerGPS = null;
                 }
 
                 @Deprecated
