@@ -123,7 +123,7 @@ class SyncWorker(private val context: Context) {
 
   /**
    * Upload WAV clips for rows whose metadata is already on the receiver. Each row is handled
-   * exactly once: if its clip exists in Music/whoBIRD/<ts_millis>.wav it is PUT to the
+   * exactly once: if its clip exists in Music/birdroid/<ts_millis>.wav it is PUT to the
    * receiver; if no file was written (write_wav off) the row is marked done and skipped
    * forever. Bounded per tick so a backlog can't stall the sync timer; stops on the first
    * network failure and retries next tick.
@@ -136,7 +136,7 @@ class SyncWorker(private val context: Context) {
     val pending = db.getClipPendingBatch(CLIP_SCAN_SIZE)
     if (pending.isEmpty()) return
 
-    val wavDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "whoBIRD")
+    val wavDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "birdroid")
     val done = mutableListOf<Int>()
     var uploaded = 0
     for (o in pending) {

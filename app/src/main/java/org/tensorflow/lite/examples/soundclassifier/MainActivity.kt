@@ -167,7 +167,7 @@ class MainActivity : BaseActivity() {
       soundClassifier?.setMetaInfluence(value)
     }
     FreeDroidWarn.showWarningOnUpgrade(this, BuildConfig.VERSION_CODE)
-    if (GithubStar.shouldShowStarDialog(this)) GithubStar.starDialog(this, "https://github.com/woheller69/whoBIRD")
+    if (GithubStar.shouldShowStarDialog(this)) GithubStar.starDialog(this, "https://github.com/ivivek/whoBIRD")
 
     requestPermissions()
 
@@ -298,14 +298,14 @@ class MainActivity : BaseActivity() {
     when (item.itemId) {
       R.id.action_share_app -> {
         val intent = Intent(Intent.ACTION_SEND)
-        val shareBody = "https://f-droid.org/packages/org.woheller69.whobird/"
+        val shareBody = "https://github.com/ivivek/whoBIRD"
         intent.setType("text/plain")
         intent.putExtra(Intent.EXTRA_TEXT, shareBody)
         startActivity(Intent.createChooser(intent, ""))
         return true
       }
       R.id.action_info -> {
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/woheller69/whobird")))
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ivivek/whoBIRD")))
         return true
       }
       else -> return super.onOptionsItemSelected(item)

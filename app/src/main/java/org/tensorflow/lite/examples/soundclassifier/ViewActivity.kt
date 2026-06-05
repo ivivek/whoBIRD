@@ -305,7 +305,7 @@ class ViewActivity : BaseActivity() {
 
         val locationString = adapter.getLocation(position)
 
-        val shareString = dateString + ", " + timeString + ", " + labelList[id].replace("_",", ") + ", " + locationString +"\n\nGet whoBIRD on F-Droid"
+        val shareString = dateString + ", " + timeString + ", " + labelList[id].replace("_",", ") + ", " + locationString +"\n\nDetected with birdroid"
 
         val shareIntent = Intent(Intent.ACTION_SEND)
         shareIntent.type = "text/plain"
