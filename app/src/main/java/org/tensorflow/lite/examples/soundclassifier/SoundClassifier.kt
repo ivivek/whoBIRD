@@ -729,7 +729,12 @@ class SoundClassifier(
       // Side-effects that must happen even when headless: DB write, optional WAV, optional sound.
       val currentLocation = LocationHelper.getPreciseLocation()
       database?.addEntry(label, currentLocation.latitude.toFloat(), currentLocation.longitude.toFloat(), element.index, element.value, timeInMillis)
-      if (sharedPref.getBoolean("write_wav",false)) WavUtils.createWaveFile(timeInMillis, recognizerWorkingBuffer.duplicate(), options.sampleRate,1,2)
+      // Privacy: never write audio of people to disk. The "Human vocal" / "Human non-vocal" /
+      // "Human whistle" classes are matched on the first label segment, which stays English
+      // in every locale file. Their detection *metadata* still flows (useful mic diagnostics);
+      // only the recording is withheld — locally and therefore also from any sync receiver.
+      val isHumanSound = labelList[element.index].split("_").first().startsWith("Human")
+      if (sharedPref.getBoolean("write_wav",false) && !isHumanSound) WavUtils.createWaveFile(timeInMillis, recognizerWorkingBuffer.duplicate(), options.sampleRate,1,2)
       if (sharedPref.getBoolean("play_sound",false)) PlayNotification.playSound(mContext)
 
       // UI update only if a binding is attached.
