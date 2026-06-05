@@ -133,13 +133,14 @@ class SyncWorker(private val context: Context) {
     val base = syncUrl.removeSuffix("/api/detections")
     if (base == syncUrl) return  // custom path we don't understand — clips not supported
 
-    val pending = db.getClipPendingBatch(CLIP_BATCH_SIZE)
+    val pending = db.getClipPendingBatch(CLIP_SCAN_SIZE)
     if (pending.isEmpty()) return
 
     val wavDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "whoBIRD")
     val done = mutableListOf<Int>()
     var uploaded = 0
     for (o in pending) {
+      if (uploaded >= CLIP_UPLOADS_PER_TICK) break  // only uploads are bounded; stat checks are free
       val wav = File(wavDir, "${o.millis}.wav")
       if (!wav.exists()) {
         done.add(o.id)  // no clip was written for this detection — never look again
@@ -167,7 +168,7 @@ class SyncWorker(private val context: Context) {
       if (abort) break
     }
     db.markClipSynced(done)
-    if (uploaded > 0) Log.i(TAG, "Uploaded $uploaded clips")
+    if (done.isNotEmpty()) Log.i(TAG, "Clips: $uploaded uploaded, ${done.size - uploaded} without a file, ${pending.size - done.size} still pending")
   }
 
   private var lastRunMs: Long = 0L
@@ -175,7 +176,8 @@ class SyncWorker(private val context: Context) {
   companion object {
     private const val TAG = "SyncWorker"
     private const val BATCH_SIZE = 200
-    private const val CLIP_BATCH_SIZE = 5  // ~300 KB each; bounded work per 30s tick
+    private const val CLIP_SCAN_SIZE = 500       // rows examined per tick (file-exists checks are cheap)
+    private const val CLIP_UPLOADS_PER_TICK = 5  // actual uploads per tick, ~300 KB each
     private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
     private val WAV_MEDIA = "audio/wav".toMediaType()
   }
