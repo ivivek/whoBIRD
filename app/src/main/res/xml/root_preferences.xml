@@ -47,7 +47,7 @@
         android:title="@string/settings_threshold"
         android:key="model_threshold"
         android:max="100"
-        android:defaultValue="30"
+        android:defaultValue="55"
         app:showSeekBarValue="true"
         />
 

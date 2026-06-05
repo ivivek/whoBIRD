@@ -158,7 +158,7 @@ class MainActivity : BaseActivity() {
 
 
 
-    val metaModelInfluence = sharedPref.getFloat("meta_model_influence", 60.0f)
+    val metaModelInfluence = sharedPref.getFloat("meta_model_influence", 90.0f)
     binding.metaInfluenceSlider.value = metaModelInfluence
     binding.metaInfluenceSlider.addOnChangeListener { slider, value, fromUser ->
       val editor=sharedPref.edit()

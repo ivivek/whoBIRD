@@ -79,7 +79,7 @@ class SoundClassifier(
     this.mContext = context.applicationContext
     this.database = BirdDBHelper.getInstance(mContext)
     val sharedPref = PreferenceManager.getDefaultSharedPreferences(mContext)
-    metaInfluence = sharedPref.getFloat("meta_model_influence", 60.0f) / 100.0f
+    metaInfluence = sharedPref.getFloat("meta_model_influence", 90.0f) / 100.0f
   }
 
   fun attachBinding(binding: ActivityMainBinding) {
@@ -722,7 +722,7 @@ class SoundClassifier(
 
   private fun updateTextView(element: IndexedValue<Float>?, tv: TextView?, timeInMillis: Long) {
     val sharedPref = PreferenceManager.getDefaultSharedPreferences(mContext)
-    if (element != null && element.value > sharedPref.getInt("model_threshold", 30)/100.0) {
+    if (element != null && element.value > sharedPref.getInt("model_threshold", 55)/100.0) {
       val label =
         labelList[element.index].split("_").last()  //show in locale language
 
