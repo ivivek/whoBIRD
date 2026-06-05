@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">whoBIRD</string>
+    <string name="app_name" translatable="false">birdroid</string>
     <string name="samples_zero">No audio input: All audio samples are zero!</string>
     <string name="latitude">Lat</string>
     <string name="longitude">Lon</string>
