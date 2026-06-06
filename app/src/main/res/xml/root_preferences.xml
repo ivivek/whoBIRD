@@ -92,6 +92,11 @@
             android:summary="@string/settings_sync_enabled_summary"
             android:defaultValue="false" />
 
+        <Preference
+            android:key="sync_pair"
+            android:title="@string/settings_sync_pair"
+            android:summary="@string/settings_sync_pair_summary" />
+
         <EditTextPreference
             android:key="sync_pi_url"
             android:title="@string/settings_sync_pi_url"

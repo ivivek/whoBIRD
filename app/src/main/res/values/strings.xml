@@ -58,5 +58,12 @@
     <string name="sync_test_wrong_server">Server reached, but it does not look like the birdroid receiver (HTTP %1$d)</string>
     <string name="sync_test_http_error">Server error: HTTP %1$d</string>
     <string name="sync_test_failed">Connection failed: %1$s</string>
+    <string name="settings_sync_pair">Pair with QR code</string>
+    <string name="settings_sync_pair_summary">Scan the dashboard’s pairing code to configure sync</string>
+    <string name="sync_pair_prompt">Point the camera at the pairing code on the dashboard (Stations → pair a phone)</string>
+    <string name="sync_pair_invalid">Not a birdroid pairing code</string>
+    <string name="sync_pair_title">Pair with this Pi?</string>
+    <string name="sync_pair_message">Detections will sync to:\n%1$s</string>
+    <string name="sync_pair_done">Paired — sync enabled</string>
 </resources>
 

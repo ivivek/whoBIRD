@@ -11,12 +11,17 @@ import android.os.Looper;
 import android.view.MenuItem;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
 import androidx.preference.SwitchPreferenceCompat;
+
+import com.journeyapps.barcodescanner.ScanContract;
+import com.journeyapps.barcodescanner.ScanOptions;
 
 import com.google.android.material.bottomappbar.BottomAppBar;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
@@ -79,6 +84,45 @@ Context mContext;
 
 
     public static class SettingsFragment extends PreferenceFragmentCompat {
+
+        // QR pairing: the dashboard's "pair a phone" code encodes
+        // birdroid://setup?url=<sync endpoint>[&station=<id>]. The embedded
+        // scanner handles the camera permission prompt itself.
+        private final ActivityResultLauncher<ScanOptions> qrScanLauncher =
+                registerForActivityResult(new ScanContract(), result -> {
+                    if (result.getContents() != null) handlePairScan(result.getContents());
+                });
+
+        private void handlePairScan(String contents) {
+            Uri uri = Uri.parse(contents);
+            String url = "birdroid".equals(uri.getScheme()) && "setup".equals(uri.getAuthority())
+                    ? uri.getQueryParameter("url") : null;
+            if (url == null || okhttp3.HttpUrl.parse(url) == null) {
+                Toast.makeText(requireContext(), R.string.sync_pair_invalid, Toast.LENGTH_LONG).show();
+                return;
+            }
+            String station = uri.getQueryParameter("station");
+            new AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.sync_pair_title)
+                    .setMessage(getString(R.string.sync_pair_message, url))
+                    .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(requireContext());
+                        SharedPreferences.Editor edit = prefs.edit()
+                                .putString("sync_pi_url", url)
+                                .putBoolean("sync_enabled", true);
+                        if (station != null && !station.trim().isEmpty())
+                            edit.putString("sync_station_id", station.trim());
+                        edit.apply();
+                        onCreatePreferences(null, null);  // rebuild so the new values show
+                        Toast.makeText(requireContext(), R.string.sync_pair_done, Toast.LENGTH_SHORT).show();
+                        // Prove the pairing end-to-end right away.
+                        runSyncTest(requireContext().getApplicationContext(), url,
+                                prefs.getString("sync_station_id", "phone-1"));
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        }
+
         @Override
         public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
             setPreferencesFromResource(R.xml.root_preferences, rootKey);
@@ -143,6 +187,18 @@ Context mContext;
                 return true; // Allow the change
             });
 
+            Preference syncPair = getPreferenceManager().findPreference("sync_pair");
+            if (syncPair != null) syncPair.setOnPreferenceClickListener(preference -> {
+                qrScanLauncher.launch(new ScanOptions()
+                        .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                        .setPrompt(getString(R.string.sync_pair_prompt))
+                        .setBeepEnabled(false)
+                        .setCaptureActivity(PortraitCaptureActivity.class)
+                        // false = don't re-lock to the sensor; the manifest pins portrait
+                        .setOrientationLocked(false));
+                return true;
+            });
+
             Preference syncTest = getPreferenceManager().findPreference("sync_test");
             if (syncTest != null) syncTest.setOnPreferenceClickListener(preference -> {
                 SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(requireContext());
@@ -151,43 +207,8 @@ Context mContext;
                     Toast.makeText(requireContext(), R.string.sync_test_no_url, Toast.LENGTH_SHORT).show();
                     return true;
                 }
-                String stationId = prefs.getString("sync_station_id", "phone-1");
-                Toast.makeText(requireContext(), R.string.sync_test_running, Toast.LENGTH_SHORT).show();
-                Context appContext = requireContext().getApplicationContext();
-                new Thread(() -> {
-                    String message;
-                    try {
-                        // Empty batch: proves reachability and that the receiver answers the
-                        // sync protocol (response carries "inserted"), without writing any rows.
-                        OkHttpClient http = new OkHttpClient.Builder()
-                                .connectTimeout(5, TimeUnit.SECONDS)
-                                .readTimeout(5, TimeUnit.SECONDS)
-                                .build();
-                        String payload = new JSONObject()
-                                .put("station_id", stationId)
-                                .put("detections", new JSONArray())
-                                .toString();
-                        Request req = new Request.Builder()
-                                .url(url)
-                                .post(RequestBody.create(payload, MediaType.get("application/json; charset=utf-8")))
-                                .build();
-                        try (Response resp = http.newCall(req).execute()) {
-                            String body = resp.body() != null ? resp.body().string() : "";
-                            if (resp.isSuccessful() && body.contains("\"inserted\"")) {
-                                message = appContext.getString(R.string.sync_test_ok);
-                            } else if (resp.isSuccessful()) {
-                                message = appContext.getString(R.string.sync_test_wrong_server, resp.code());
-                            } else {
-                                message = appContext.getString(R.string.sync_test_http_error, resp.code());
-                            }
-                        }
-                    } catch (Exception e) {
-                        message = appContext.getString(R.string.sync_test_failed, e.getMessage());
-                    }
-                    String finalMessage = message;
-                    new Handler(Looper.getMainLooper()).post(() ->
-                            Toast.makeText(appContext, finalMessage, Toast.LENGTH_LONG).show());
-                }).start();
+                runSyncTest(requireContext().getApplicationContext(), url,
+                        prefs.getString("sync_station_id", "phone-1"));
                 return true;
             });
 
@@ -207,6 +228,47 @@ Context mContext;
             });
 
         }
+
+        /** Fires an empty batch at the receiver and toasts the outcome. Used by "Test
+         *  connection" and after QR pairing. The empty batch proves reachability and that
+         *  the server answers the sync protocol (response carries "inserted") without
+         *  writing any rows. */
+        private static void runSyncTest(Context appContext, String url, String stationId) {
+            Toast.makeText(appContext, R.string.sync_test_running, Toast.LENGTH_SHORT).show();
+            new Thread(() -> {
+                String message;
+                try {
+                    OkHttpClient http = new OkHttpClient.Builder()
+                            .connectTimeout(5, TimeUnit.SECONDS)
+                            .readTimeout(5, TimeUnit.SECONDS)
+                            .build();
+                    String payload = new JSONObject()
+                            .put("station_id", stationId)
+                            .put("detections", new JSONArray())
+                            .toString();
+                    Request req = new Request.Builder()
+                            .url(url)
+                            .post(RequestBody.create(payload, MediaType.get("application/json; charset=utf-8")))
+                            .build();
+                    try (Response resp = http.newCall(req).execute()) {
+                        String body = resp.body() != null ? resp.body().string() : "";
+                        if (resp.isSuccessful() && body.contains("\"inserted\"")) {
+                            message = appContext.getString(R.string.sync_test_ok);
+                        } else if (resp.isSuccessful()) {
+                            message = appContext.getString(R.string.sync_test_wrong_server, resp.code());
+                        } else {
+                            message = appContext.getString(R.string.sync_test_http_error, resp.code());
+                        }
+                    }
+                } catch (Exception e) {
+                    message = appContext.getString(R.string.sync_test_failed, e.getMessage());
+                }
+                String finalMessage = message;
+                new Handler(Looper.getMainLooper()).post(() ->
+                        Toast.makeText(appContext, finalMessage, Toast.LENGTH_LONG).show());
+            }).start();
+        }
+
         private boolean isValidGPSFormat(String value) {
             if (value == null || value.isEmpty()) return false;
             return value.matches("^-?\\d+(\\.\\d+)?/-?\\d+(\\.\\d+)?$");
