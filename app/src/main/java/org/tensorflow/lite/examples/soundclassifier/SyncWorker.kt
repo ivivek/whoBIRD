@@ -1,6 +1,9 @@
 package org.tensorflow.lite.examples.soundclassifier
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
 import android.os.Environment
 import android.util.Log
 import androidx.preference.PreferenceManager
@@ -23,12 +26,19 @@ import kotlin.concurrent.scheduleAtFixedRate
  * toggle sync / change the URL without restarting the service.
  *
  * Wire protocol — POST {pi_url}:
- *   { "station_id": "phone-1", "detections": [
+ *   { "station_id": "phone-1",
+ *     "health": { "ts_millis": 1717..., "battery_pct": 87, "charging": true, "plug": "ac",
+ *                 "temp_c": 31.4, "voltage_mv": 4123 },
+ *     "detections": [
  *       { "client_id": 42, "ts_millis": 1717..., "species": "Eurasian Blackbird",
  *         "species_id": 123, "confidence": 0.84, "lat": 12.97, "lon": 77.59 }, ... ] }
  *
  * The Pi is expected to be idempotent on (station_id, client_id) — we may retry the same batch
  * if a response is lost mid-flight.
+ *
+ * "health" is the station-health report (battery/charging/temperature) and rides along with
+ * every POST. When there is nothing to sync, an empty-detections POST is still sent every
+ * HEARTBEAT_MS so the Pi can tell a quiet station from a dead one (and chart the battery).
  */
 class SyncWorker(private val context: Context) {
 
@@ -77,7 +87,8 @@ class SyncWorker(private val context: Context) {
 
     val stationId = prefs.getString("sync_station_id", "phone-1") ?: "phone-1"
     val batch = db.getUnsyncedBatch(BATCH_SIZE)
-    if (batch.isEmpty()) {
+    if (batch.isEmpty() && now - lastHeartbeatMs < HEARTBEAT_MS) {
+      // Nothing to sync and a recent heartbeat already proved liveness.
       consecutiveFailures = 0
       uploadPendingClips(url, stationId)
       return
@@ -85,6 +96,7 @@ class SyncWorker(private val context: Context) {
 
     val payload = JSONObject().apply {
       put("station_id", stationId)
+      batteryHealth()?.let { put("health", it) }
       val arr = JSONArray()
       for (o in batch) {
         arr.put(JSONObject().apply {
@@ -106,9 +118,10 @@ class SyncWorker(private val context: Context) {
       http.newCall(req).execute().use { resp ->
         if (resp.isSuccessful) {
           val ids = batch.map { it.id }
-          db.markSynced(ids)
+          if (ids.isNotEmpty()) db.markSynced(ids)
           consecutiveFailures = 0
-          Log.i(TAG, "Synced ${ids.size} rows to $url")
+          lastHeartbeatMs = now
+          Log.i(TAG, if (ids.isEmpty()) "Heartbeat sent to $url" else "Synced ${ids.size} rows to $url")
           uploadPendingClips(url, stationId)
         } else {
           consecutiveFailures++
@@ -171,13 +184,41 @@ class SyncWorker(private val context: Context) {
     if (done.isNotEmpty()) Log.i(TAG, "Clips: $uploaded uploaded, ${done.size - uploaded} without a file, ${pending.size - done.size} still pending")
   }
 
+  /**
+   * Station-health snapshot from the sticky ACTION_BATTERY_CHANGED broadcast (no receiver
+   * registration, no permission). Null only if the system has never sent the broadcast.
+   */
+  private fun batteryHealth(): JSONObject? {
+    val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED)) ?: return null
+    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+    val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+    val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+    val temp = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)  // tenths of °C
+    val voltage = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)              // mV
+    return JSONObject().apply {
+      put("ts_millis", System.currentTimeMillis())
+      if (level >= 0 && scale > 0) put("battery_pct", level * 100 / scale)
+      put("charging", status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL)
+      put("plug", when (intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)) {
+        BatteryManager.BATTERY_PLUGGED_AC -> "ac"
+        BatteryManager.BATTERY_PLUGGED_USB -> "usb"
+        BatteryManager.BATTERY_PLUGGED_WIRELESS -> "wireless"
+        else -> "none"
+      })
+      if (temp != Int.MIN_VALUE) put("temp_c", temp / 10.0)
+      if (voltage > 0) put("voltage_mv", voltage)
+    }
+  }
+
   private var lastRunMs: Long = 0L
+  private var lastHeartbeatMs: Long = 0L
 
   companion object {
     private const val TAG = "SyncWorker"
     private const val BATCH_SIZE = 200
     private const val CLIP_SCAN_SIZE = 500       // rows examined per tick (file-exists checks are cheap)
     private const val CLIP_UPLOADS_PER_TICK = 5  // actual uploads per tick, ~300 KB each
+    private const val HEARTBEAT_MS = 5 * 60_000L // empty-batch health report cadence
     private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
     private val WAV_MEDIA = "audio/wav".toMediaType()
   }
