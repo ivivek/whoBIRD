@@ -11,4 +11,22 @@
         <item>1</item>
         <item>6</item>
     </string-array>
+
+    <string-array name="clip_cache_entries">
+        <item>100 MB</item>
+        <item>250 MB</item>
+        <item>500 MB</item>
+        <item>1 GB</item>
+        <item>2 GB</item>
+        <item>5 GB</item>
+    </string-array>
+
+    <string-array name="clip_cache_values">
+        <item>100</item>
+        <item>250</item>
+        <item>500</item>
+        <item>1024</item>
+        <item>2048</item>
+        <item>5120</item>
+    </string-array>
 </resources>

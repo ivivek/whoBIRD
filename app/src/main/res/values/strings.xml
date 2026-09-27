@@ -26,6 +26,17 @@
     <string name="settings_notification_sound">Notification sound</string>
     <string name="save_wav">Save .wav files</string>
     <string name="summary_save_wav">Saves a .wav file for each detection in Music directory. Requires Android 12+</string>
+    <string name="settings_clip_cache">Audio clip storage limit</string>
+    <string name="settings_clip_clear">Clear audio clips</string>
+    <string name="clip_cache_counting">Counting…</string>
+    <string name="clip_cache_usage">%1$s in %2$d clips · %3$d not uploaded yet. Oldest uploaded clips are deleted first when over the limit.</string>
+    <string name="clip_clear_empty">No clips stored</string>
+    <string name="clip_cache_busy">Deleting old clips to fit the limit… try again in a few minutes</string>
+    <string name="clip_clear_title">Clear audio clips?</string>
+    <string name="clip_clear_message">Uploaded: %1$d clips (%2$s) — already on the Pi, safe to delete.\n\nNot uploaded yet: %3$d clips (%4$s) — lost for good if deleted.</string>
+    <string name="clip_clear_uploaded">Delete uploaded</string>
+    <string name="clip_clear_all">Delete all</string>
+    <string name="clip_clear_done">Deleted %1$d clips</string>
     <string name="language">Language</string>
     <string name="high_contrast_theme">High contrast</string>
     <string name="settings_meta_extended">Weighted Meta Model</string>

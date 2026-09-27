@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 
 public class WavUtils {
     public static final String TAG = "WavUtils";
+    private static final long MIN_FREE_BYTES = 1024L * 1024 * 1024;  // stop writing clips below 1 GB free
 
     public static void playWaveFile(Context context, long timestamp) {
         File path = new File(Environment.getExternalStoragePublicDirectory(DIRECTORY_MUSIC).getPath()+"/birdroid/" + timestamp +".wav");
@@ -47,6 +48,11 @@ public class WavUtils {
             File path = new File(Environment.getExternalStoragePublicDirectory(DIRECTORY_MUSIC).getPath()+"/birdroid");
             if (!path.exists() && !path.mkdirs()) {
                 Log.e(TAG, "Failed to make directory: " + path);
+                return;
+            }
+            // Clips are optional; a full phone breaks the detection DB and everything else.
+            if (path.getUsableSpace() < MIN_FREE_BYTES) {
+                Log.w(TAG, "Low storage, skipping clip: " + path.getUsableSpace() / (1024 * 1024) + " MB free");
                 return;
             }
             String filePath = path.getAbsolutePath()+"/" + timestamp+".wav";

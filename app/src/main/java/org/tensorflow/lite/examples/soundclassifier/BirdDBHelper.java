@@ -215,6 +215,18 @@ public class BirdDBHelper extends SQLiteOpenHelper {
         return out;
     }
 
+    /** TimeInMillis of every row whose clip hasn't been uploaded (or found absent) yet —
+     *  the WAVs ClipCache avoids deleting. */
+    public synchronized Set<Long> getClipPendingMillis() {
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor cursor = db.rawQuery("SELECT " + COLUMN_MILLIS + " FROM " + TABLE_NAME +
+                " WHERE " + COLUMN_CLIP_SYNCED + " = 0", null);
+        Set<Long> out = new HashSet<>();
+        while (cursor.moveToNext()) out.add(cursor.getLong(0));
+        cursor.close();
+        return out;
+    }
+
     /** Mark the given row IDs as clip-handled (uploaded or no clip exists). */
     public synchronized void markClipSynced(List<Integer> ids) {
         if (ids.isEmpty()) return;

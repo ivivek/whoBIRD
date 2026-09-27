@@ -71,6 +71,18 @@
         android:defaultValue="false"
         />
 
+    <ListPreference
+        app:defaultValue="500"
+        app:entries="@array/clip_cache_entries"
+        app:entryValues="@array/clip_cache_values"
+        app:key="clip_cache_mb"
+        app:title="@string/settings_clip_cache"
+        app:useSimpleSummaryProvider="true" />
+
+    <Preference
+        android:key="clip_cache_clear"
+        android:title="@string/settings_clip_clear" />
+
     <org.woheller69.preferences.EditTextSwitchPreference
         android:selectable="true"
         app:useSimpleSummaryProvider="true"

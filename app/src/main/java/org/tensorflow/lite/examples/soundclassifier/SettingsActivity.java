@@ -8,6 +8,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.format.Formatter;
 import android.view.MenuItem;
 import android.widget.Toast;
 
@@ -212,6 +213,35 @@ Context mContext;
                 return true;
             });
 
+            Preference clipCap = findPreference(ClipCache.PREF_CAP_MB);
+            if (clipCap != null) clipCap.setOnPreferenceChangeListener((preference, newValue) -> {
+                // Apply a lowered cap now instead of on the service's next minutely check.
+                // The listener runs before the value is saved, so hand it over explicitly.
+                Context appContext = requireContext().getApplicationContext();
+                long capMb = Long.parseLong((String) newValue);
+                new Thread(() -> {
+                    ClipCache.INSTANCE.trim(appContext, capMb);
+                    refreshClipUsage();
+                }).start();
+                return true;
+            });
+
+            Preference clipClear = findPreference("clip_cache_clear");
+            if (clipClear != null) clipClear.setOnPreferenceClickListener(preference -> {
+                Context appContext = requireContext().getApplicationContext();
+                if (ClipCache.INSTANCE.getBusy()) {
+                    Toast.makeText(appContext, R.string.clip_cache_busy, Toast.LENGTH_LONG).show();
+                    refreshClipUsage();
+                    return true;
+                }
+                new Thread(() -> {
+                    ClipCache.Usage usage = ClipCache.INSTANCE.usage(appContext);
+                    new Handler(Looper.getMainLooper()).post(() -> showClearClipsDialog(usage));
+                }).start();
+                return true;
+            });
+            refreshClipUsage();
+
             EditTextSwitchPreference manualLocationValue = findPreference("manual_location_value");
             manualLocationValue.setOnPreferenceChangeListener((preference, newValue) -> {
                 String newVal = newValue.toString();
@@ -227,6 +257,58 @@ Context mContext;
                 }
             });
 
+        }
+
+        /** Recomputes the clip folder's usage off the main thread (it stats every file and
+         *  queries the DB) and shows it as the "Clear audio clips" summary. */
+        private void refreshClipUsage() {
+            Preference clipClear = findPreference("clip_cache_clear");
+            if (clipClear == null || getContext() == null) return;
+            Context appContext = requireContext().getApplicationContext();
+            new Handler(Looper.getMainLooper()).post(() -> clipClear.setSummary(R.string.clip_cache_counting));
+            new Thread(() -> {
+                ClipCache.Usage usage = ClipCache.INSTANCE.usage(appContext);
+                String counts = appContext.getString(R.string.clip_cache_usage,
+                        Formatter.formatShortFileSize(appContext, usage.getBytes()),
+                        usage.getFiles(), usage.getPendingFiles());
+                String summary = ClipCache.INSTANCE.getBusy()
+                        ? appContext.getString(R.string.clip_cache_busy) + "\n" + counts : counts;
+                new Handler(Looper.getMainLooper()).post(() -> clipClear.setSummary(summary));
+            }).start();
+        }
+
+        /** Uploaded clips are safe to delete (the Pi has them); not-yet-uploaded ones are only
+         *  deleted on an explicit "Delete all". Each button appears only when it would delete
+         *  something. */
+        private void showClearClipsDialog(ClipCache.Usage usage) {
+            if (getContext() == null) return;
+            Context appContext = requireContext().getApplicationContext();
+            if (usage.getFiles() == 0) {
+                Toast.makeText(appContext, R.string.clip_clear_empty, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            int uploaded = usage.getFiles() - usage.getPendingFiles();
+            long uploadedBytes = usage.getBytes() - usage.getPendingBytes();
+            AlertDialog.Builder builder = new AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.clip_clear_title)
+                    .setMessage(getString(R.string.clip_clear_message,
+                            uploaded, Formatter.formatShortFileSize(appContext, uploadedBytes),
+                            usage.getPendingFiles(), Formatter.formatShortFileSize(appContext, usage.getPendingBytes())))
+                    .setNegativeButton(android.R.string.cancel, null);
+            if (uploaded > 0)
+                builder.setPositiveButton(R.string.clip_clear_uploaded, (d, w) -> clearClips(appContext, false));
+            if (usage.getPendingFiles() > 0)
+                builder.setNeutralButton(R.string.clip_clear_all, (d, w) -> clearClips(appContext, true));
+            builder.show();
+        }
+
+        private void clearClips(Context appContext, boolean includePending) {
+            new Thread(() -> {
+                int n = ClipCache.INSTANCE.clear(appContext, includePending);
+                new Handler(Looper.getMainLooper()).post(() ->
+                        Toast.makeText(appContext, appContext.getString(R.string.clip_clear_done, n), Toast.LENGTH_SHORT).show());
+                refreshClipUsage();
+            }).start();
         }
 
         /** Fires an empty batch at the receiver and toasts the outcome. Used by "Test

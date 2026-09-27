@@ -68,6 +68,13 @@ class SyncWorker(private val context: Context) {
   }
 
   private fun tick() {
+    // Clip-folder cap applies whether or not sync is on, so it runs before the sync gate.
+    val nowMs = System.currentTimeMillis()
+    if (nowMs - lastCacheTrimMs >= CACHE_TRIM_MS) {
+      lastCacheTrimMs = nowMs
+      try { ClipCache.trim(context) } catch (e: Exception) { Log.w(TAG, "Clip trim failed: ${e.message}") }
+    }
+
     val prefs = PreferenceManager.getDefaultSharedPreferences(context)
     if (!prefs.getBoolean("sync_enabled", false)) return
 
@@ -212,6 +219,7 @@ class SyncWorker(private val context: Context) {
 
   private var lastRunMs: Long = 0L
   private var lastHeartbeatMs: Long = 0L
+  private var lastCacheTrimMs: Long = 0L
 
   companion object {
     private const val TAG = "SyncWorker"
@@ -219,6 +227,7 @@ class SyncWorker(private val context: Context) {
     private const val CLIP_SCAN_SIZE = 500       // rows examined per tick (file-exists checks are cheap)
     private const val CLIP_UPLOADS_PER_TICK = 5  // actual uploads per tick, ~300 KB each
     private const val HEARTBEAT_MS = 5 * 60_000L // empty-batch health report cadence
+    private const val CACHE_TRIM_MS = 60_000L    // clip-folder size check cadence
     private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
     private val WAV_MEDIA = "audio/wav".toMediaType()
   }
