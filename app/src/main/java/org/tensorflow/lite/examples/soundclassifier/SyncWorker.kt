@@ -89,10 +89,16 @@ class SyncWorker(private val context: Context) {
       (1L shl consecutiveFailures.coerceAtMost(6)) * 5_000L  // 5s..320s
     } else 0L
     val minWait = maxOf(intervalMs, backoffMs)
-    if (now - lastRunMs < minWait) return
+    val stationId = prefs.getString("sync_station_id", "phone-1") ?: "phone-1"
+    if (now - lastRunMs < minWait) {
+      // Between sync runs, keep draining a clip backlog on every tick. clipBacklog is cleared
+      // when the queue empties or an upload fails, so a failing receiver is only retried on
+      // the next sync run — which honours the interval and the backoff above.
+      if (clipBacklog && consecutiveFailures == 0) uploadPendingClips(url, stationId)
+      return
+    }
     lastRunMs = now
 
-    val stationId = prefs.getString("sync_station_id", "phone-1") ?: "phone-1"
     val batch = db.getUnsyncedBatch(BATCH_SIZE)
     if (batch.isEmpty() && now - lastHeartbeatMs < HEARTBEAT_MS) {
       // Nothing to sync and a recent heartbeat already proved liveness.
@@ -143,24 +149,31 @@ class SyncWorker(private val context: Context) {
 
   /**
    * Upload WAV clips for rows whose metadata is already on the receiver. Each row is handled
-   * exactly once: if its clip exists in Music/birdroid/<ts_millis>.wav it is PUT to the
+   * exactly once: if its clip exists in Music/birdroid/<ts_millis>.wav it is POSTed to the
    * receiver; if no file was written (write_wav off) the row is marked done and skipped
-   * forever. Bounded per tick so a backlog can't stall the sync timer; stops on the first
-   * network failure and retries next tick.
+   * forever.
+   *
+   * Runs on every sync run and, while a backlog remains, on every 5s timer tick in between.
+   * Each pass is bounded by time, not count: no new upload starts after CLIP_UPLOAD_BUDGET_MS,
+   * so detection sync and heartbeats (same timer thread) are never held up by more than the
+   * budget plus one upload's timeout, while a fast link drains a burst's backlog in minutes.
+   * Stops on the first network failure and leaves the retry to the next sync run.
    */
   private fun uploadPendingClips(syncUrl: String, stationId: String) {
     // Derive the clip endpoint from the configured detections URL.
     val base = syncUrl.removeSuffix("/api/detections")
-    if (base == syncUrl) return  // custom path we don't understand — clips not supported
+    if (base == syncUrl) { clipBacklog = false; return }  // custom path we don't understand — clips not supported
 
     val pending = db.getClipPendingBatch(CLIP_SCAN_SIZE)
-    if (pending.isEmpty()) return
+    if (pending.isEmpty()) { clipBacklog = false; return }
 
     val wavDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "birdroid")
     val done = mutableListOf<Int>()
     var uploaded = 0
+    var failed = false
+    val deadline = System.currentTimeMillis() + CLIP_UPLOAD_BUDGET_MS
     for (o in pending) {
-      if (uploaded >= CLIP_UPLOADS_PER_TICK) break  // only uploads are bounded; stat checks are free
+      if (System.currentTimeMillis() >= deadline) break  // only uploads cost time; stat checks are free
       val wav = File(wavDir, "${o.millis}.wav")
       if (!wav.exists()) {
         done.add(o.id)  // no clip was written for this detection — never look again
@@ -170,7 +183,6 @@ class SyncWorker(private val context: Context) {
         .url("$base/api/clip/$stationId/${o.millis}")
         .post(wav.asRequestBody(WAV_MEDIA))
         .build()
-      var abort = false
       try {
         http.newCall(req).execute().use { resp ->
           if (resp.isSuccessful) {
@@ -178,16 +190,18 @@ class SyncWorker(private val context: Context) {
             uploaded++
           } else {
             Log.w(TAG, "Clip upload HTTP ${resp.code} for ${o.millis}")
-            abort = true  // server-side problem: stop this tick, retry remaining next tick
+            failed = true  // server-side problem: stop, retry remaining on the next sync run
           }
         }
       } catch (e: Exception) {
         Log.w(TAG, "Clip upload failed: ${e.message}")
-        abort = true
+        failed = true
       }
-      if (abort) break
+      if (failed) break
     }
     db.markClipSynced(done)
+    // More to do if this pass stopped early (budget) or the scan window was full.
+    clipBacklog = !failed && (done.size < pending.size || pending.size == CLIP_SCAN_SIZE)
     if (done.isNotEmpty()) Log.i(TAG, "Clips: $uploaded uploaded, ${done.size - uploaded} without a file, ${pending.size - done.size} still pending")
   }
 
@@ -220,12 +234,13 @@ class SyncWorker(private val context: Context) {
   private var lastRunMs: Long = 0L
   private var lastHeartbeatMs: Long = 0L
   private var lastCacheTrimMs: Long = 0L
+  private var clipBacklog: Boolean = false  // clips left over from the last pass; drained between sync runs
 
   companion object {
     private const val TAG = "SyncWorker"
     private const val BATCH_SIZE = 200
     private const val CLIP_SCAN_SIZE = 500       // rows examined per tick (file-exists checks are cheap)
-    private const val CLIP_UPLOADS_PER_TICK = 5  // actual uploads per tick, ~300 KB each
+    private const val CLIP_UPLOAD_BUDGET_MS = 3_000L  // no new clip upload (~300 KB) starts after this, per pass
     private const val HEARTBEAT_MS = 5 * 60_000L // empty-batch health report cadence
     private const val CACHE_TRIM_MS = 60_000L    // clip-folder size check cadence
     private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
