@@ -25,7 +25,7 @@
     <string name="settings_audiosource">Audio Source</string>
     <string name="settings_notification_sound">Notification sound</string>
     <string name="save_wav">Save .wav files</string>
-    <string name="summary_save_wav">Saves a .wav file for each detection in Music directory. Requires Android 12+</string>
+    <string name="summary_save_wav">Saves .wav files in Music directory: per species, the first detection every 30 s plus any more confident one. Requires Android 12+</string>
     <string name="settings_clip_cache">Audio clip storage limit</string>
     <string name="settings_clip_clear">Clear audio clips</string>
     <string name="clip_cache_counting">Counting…</string>

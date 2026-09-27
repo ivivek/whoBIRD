@@ -170,6 +170,9 @@ class SoundClassifier(
 
   private var recognitionTask: TimerTask? = null
 
+  /** Per species index: (window start millis, confidence of the last clip saved in it). */
+  private val clipWindows = HashMap<Int, Pair<Long, Float>>()
+
   /** Used to record audio samples. */
   private lateinit var audioRecord: AudioRecord
 
@@ -720,6 +723,26 @@ class SoundClassifier(
     }
   }
 
+  /**
+   * Clip thinning: a bird calling non-stop is detected every 800ms, and a clip per detection
+   * is ~288 KB of near-identical audio. Per species, save the first clip of a CLIP_WINDOW_MS
+   * window and afterwards only clips that beat the best saved so far in it — so the window's
+   * most confident clip is always kept, the first one too (alerts link it), and nothing is
+   * held back or deleted. Rows are still recorded for every detection; only files are skipped.
+   */
+  private fun shouldSaveClip(element: IndexedValue<Float>, timeInMillis: Long): Boolean {
+    val window = clipWindows[element.index]
+    if (window == null || timeInMillis - window.first >= CLIP_WINDOW_MS) {
+      clipWindows[element.index] = Pair(timeInMillis, element.value)
+      return true
+    }
+    if (element.value > window.second) {
+      clipWindows[element.index] = Pair(window.first, element.value)
+      return true
+    }
+    return false
+  }
+
   private fun updateTextView(element: IndexedValue<Float>?, tv: TextView?, timeInMillis: Long) {
     val sharedPref = PreferenceManager.getDefaultSharedPreferences(mContext)
     if (element != null && element.value > sharedPref.getInt("model_threshold", 55)/100.0) {
@@ -734,7 +757,7 @@ class SoundClassifier(
       // in every locale file. Their detection *metadata* still flows (useful mic diagnostics);
       // only the recording is withheld — locally and therefore also from any sync receiver.
       val isHumanSound = labelList[element.index].split("_").first().startsWith("Human")
-      if (sharedPref.getBoolean("write_wav",false) && !isHumanSound) WavUtils.createWaveFile(timeInMillis, recognizerWorkingBuffer.duplicate(), options.sampleRate,1,2)
+      if (sharedPref.getBoolean("write_wav",false) && !isHumanSound && shouldSaveClip(element, timeInMillis)) WavUtils.createWaveFile(timeInMillis, recognizerWorkingBuffer.duplicate(), options.sampleRate,1,2)
       if (sharedPref.getBoolean("play_sound",false)) PlayNotification.playSound(mContext)
 
       // UI update only if a binding is attached.
@@ -781,6 +804,7 @@ class SoundClassifier(
     private const val TAG = "SoundClassifier"
     private const val PREF_LAST_LAT = "last_fix_lat"
     private const val PREF_LAST_LON = "last_fix_lon"
+    private const val CLIP_WINDOW_MS = 30_000L
     var lat: Float = 0.0f
     var lon: Float = 0.0f
     /** Number of nanoseconds in a millisecond  */
